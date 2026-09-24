@@ -44,8 +44,21 @@ class TrackUploadService
         }
 
         return DB::transaction(function () use ($user, $file, $storagePath, $coverPath, $meta, $size) {
-            $user->refresh();
-            if ($size > $user->storageRemainingBytes()) {
+            /** @var User|null $locked */
+            $locked = User::query()
+                ->whereKey($user->id)
+                ->lockForUpdate()
+                ->first();
+
+            if ($locked === null) {
+                $this->media->delete($storagePath);
+                if ($coverPath) {
+                    $this->media->delete($coverPath);
+                }
+                throw new RuntimeException('User not found during quota check.');
+            }
+
+            if ($size > $locked->storageRemainingBytes()) {
                 $this->media->delete($storagePath);
                 if ($coverPath) {
                     $this->media->delete($coverPath);
@@ -56,7 +69,7 @@ class TrackUploadService
             }
 
             $track = Track::query()->create([
-                'user_id' => $user->id,
+                'user_id' => $locked->id,
                 'title' => $meta['title']
                     ?: (pathinfo($file->getClientOriginalName() ?: 'Untitled', PATHINFO_FILENAME) ?: 'Untitled'),
                 'artist_name' => $meta['artist_name'],
@@ -71,7 +84,7 @@ class TrackUploadService
                 'import_mode' => 'stored',
             ]);
 
-            $user->increment('storage_used_bytes', $size);
+            $locked->increment('storage_used_bytes', $size);
 
             return $track->fresh();
         });
