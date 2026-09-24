@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Services\InviteRedeemService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -30,7 +31,7 @@ class AuthController extends Controller
 
         if (! $user->isActive()) {
             throw ValidationException::withMessages([
-                'email' => ['This account is disabled.'],
+                'email' => ['This account is disabled'],
             ]);
         }
 
@@ -44,22 +45,44 @@ class AuthController extends Controller
         ]);
     }
 
-    public function register(Request $request): JsonResponse
+    public function register(Request $request, InviteRedeemService $invites): JsonResponse
     {
         $mode = config('max-tune.mode', 'personal');
 
         if ($mode === 'personal') {
             return response()->json([
-                'message' => 'Registration is disabled in personal mode.',
+                'message' => 'Registration is closed',
             ], 403);
         }
 
         if ($mode === 'invite') {
+            $data = $request->validate([
+                'name' => ['required', 'string', 'max:120'],
+                'email' => ['required', 'email', 'max:255', 'unique:users,email'],
+                'password' => ['required', 'string', 'min:8', 'confirmed'],
+                'invite_code' => ['required', 'string', 'max:64'],
+                'device_name' => ['sometimes', 'string', 'max:120'],
+            ], [
+                'invite_code.required' => 'Invite code required',
+                'email.unique' => 'Email already registered · Sign in instead',
+            ]);
+
+            $user = $invites->redeemAndRegister($data['invite_code'], [
+                'name' => $data['name'],
+                'email' => $data['email'],
+                'password' => $data['password'],
+            ]);
+
+            $token = $user->createToken($data['device_name'] ?? 'max-tune-web')->plainTextToken;
+
             return response()->json([
-                'message' => 'Invite-only registration is not available yet.',
-            ], 403);
+                'token' => $token,
+                'token_type' => 'Bearer',
+                'user' => $this->userPayload($user),
+            ], 201);
         }
 
+        // public mode
         $data = $request->validate([
             'name' => ['required', 'string', 'max:120'],
             'email' => ['required', 'email', 'max:255', 'unique:users,email'],
@@ -101,8 +124,10 @@ class AuthController extends Controller
             'name' => $user->name,
             'email' => $user->email,
             'role' => $user->role,
+            'is_admin' => $user->isAdmin(),
             'status' => $user->status,
-            'storage_used_bytes' => $user->storage_used_bytes,
+            'storage_used_bytes' => (int) $user->storage_used_bytes,
+            'storage_quota_bytes' => $user->storageQuotaBytes(),
         ];
     }
 }
