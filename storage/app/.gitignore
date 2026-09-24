@@ -1,0 +1,7 @@
+*
+!private/
+!public/
+!.gitignore
+
+tmp/
+!tmp/.gitignore
