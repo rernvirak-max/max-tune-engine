@@ -2,10 +2,12 @@
 
 namespace Tests\Feature;
 
+use App\Exceptions\ImportRejectedException;
 use App\Exceptions\MediaImportFailedException;
 use App\Jobs\ProcessYoutubeImport;
 use App\Models\MediaImport;
 use App\Models\User;
+use App\Services\YoutubeImportService;
 use App\Services\YtDlp;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Queue\MaxAttemptsExceededException;
@@ -215,6 +217,105 @@ class YoutubeImportJobTest extends TestCase
         $this->assertDirectoryDoesNotExist($timedOut->workDir());
     }
 
+    public function test_failed_hook_never_overwrites_a_settled_or_deleted_import(): void
+    {
+        $ready = MediaImport::factory()->create(['status' => MediaImport::STATUS_READY]);
+        $deleted = MediaImport::factory()->create(['video_id' => 'BBBBBBBBBBB', 'status' => MediaImport::STATUS_DOWNLOADING]);
+        $job = new ProcessYoutubeImport($deleted);
+        $deleted->delete();
+
+        (new ProcessYoutubeImport($ready))->failed(new TimeoutExceededException('late'));
+        $job->failed(new TimeoutExceededException('late'));
+
+        $this->assertSame(MediaImport::STATUS_READY, $ready->fresh()->status);
+        $this->assertNull($ready->fresh()->reason_code);
+        $this->assertDatabaseMissing('media_imports', ['id' => $deleted->id]);
+    }
+
+    public function test_job_timeout_and_queue_connection_come_from_config(): void
+    {
+        $job = new ProcessYoutubeImport(MediaImport::factory()->create());
+        $jobBudget = (int) config('max-tune.youtube.job_timeout_seconds');
+        $connection = config('queue.connections.'.config('max-tune.youtube.queue_connection'));
+
+        $this->assertSame($jobBudget + (int) config('max-tune.youtube.worker_timeout_margin_seconds'), $job->timeout);
+        $this->assertGreaterThan($jobBudget, $job->timeout);
+        $this->assertSame('database-imports', $job->connection);
+        $this->assertSame('imports', $job->queue);
+        $this->assertSame('database', $connection['driver']);
+        $this->assertGreaterThan($job->timeout, $connection['retry_after'], 'retry_after must outlive the job or it runs twice');
+    }
+
+    public function test_double_retry_queues_once_and_creates_one_track(): void
+    {
+        $import = MediaImport::factory()->create(['status' => MediaImport::STATUS_FAILED, 'reason_code' => MediaImport::REASON_UNKNOWN]);
+        $stale = $import->fresh();
+        $service = app(YoutubeImportService::class);
+
+        $service->retry($import);
+
+        try {
+            $service->retry($stale);
+            $this->fail('A second retry of the same failed import must be refused.');
+        } catch (ImportRejectedException $e) {
+            $this->assertSame('invalid_state', $e->reason);
+        }
+
+        Queue::assertPushed(ProcessYoutubeImport::class, 1);
+
+        // Even if the job were delivered twice, only one worker claims it.
+        $this->fakeYtDlp();
+        $this->runJob($import);
+        $this->runJob($import);
+
+        $this->assertSame(MediaImport::STATUS_READY, $import->fresh()->status);
+        $this->assertDatabaseCount('tracks', 1);
+    }
+
+    public function test_import_dismissed_before_a_worker_starts_creates_no_track(): void
+    {
+        $import = MediaImport::factory()->create();
+        $job = new ProcessYoutubeImport($import);
+        $this->mock(YtDlp::class, fn (MockInterface $mock) => $mock->shouldNotReceive('fetchMetadata'));
+
+        app(YoutubeImportService::class)->discard($import);
+        app()->call([$job, 'handle']);
+
+        $this->assertDatabaseCount('media_imports', 0);
+        $this->assertDatabaseCount('tracks', 0);
+        $this->assertDirectoryDoesNotExist($import->workDir());
+    }
+
+    public function test_import_swept_and_dismissed_mid_download_creates_no_track_or_files(): void
+    {
+        $user = User::factory()->create();
+        $import = MediaImport::factory()->for($user, 'owner')->create();
+        $this->fakeYtDlp(duringDownload: function () use ($import) {
+            MediaImport::query()->whereKey($import->id)->update(['status' => MediaImport::STATUS_FAILED]);
+            app(YoutubeImportService::class)->discard($import);
+        });
+
+        $this->runJob($import);
+
+        $this->assertDatabaseCount('media_imports', 0);
+        $this->assertDatabaseCount('tracks', 0);
+        $this->assertSame([], Storage::disk('media')->allFiles());
+        $this->assertSame(0, (int) $user->fresh()->storage_used_bytes);
+        $this->assertDirectoryDoesNotExist($import->workDir());
+    }
+
+    public function test_second_worker_with_the_same_job_is_a_no_op(): void
+    {
+        $import = MediaImport::factory()->create();
+        $this->fakeYtDlp(duringDownload: fn () => $this->runJob($import));
+
+        $this->runJob($import);
+
+        $this->assertSame(MediaImport::STATUS_READY, $import->fresh()->status);
+        $this->assertSame(1, $import->fresh()->attempts);
+        $this->assertDatabaseCount('tracks', 1);
+    }
+
     public function test_job_skips_imports_that_are_no_longer_queued(): void
     {
         $import = MediaImport::factory()->create(['status' => MediaImport::STATUS_FAILED]);
@@ -243,6 +344,20 @@ class YoutubeImportJobTest extends TestCase
         $this->assertDirectoryDoesNotExist($this->workRoot.'/999');
     }
 
+    public function test_sweep_expires_imports_queued_too_long_so_they_free_their_slot(): void
+    {
+        $lost = MediaImport::factory()->create();
+        $fresh = MediaImport::factory()->create(['video_id' => 'BBBBBBBBBBB']);
+        $lost->forceFill(['updated_at' => now()->subMinutes(31)])->saveQuietly();
+
+        $this->artisan('imports:sweep')->assertSuccessful();
+
+        $this->assertSame(MediaImport::STATUS_FAILED, $lost->fresh()->status);
+        $this->assertSame(MediaImport::REASON_INTERRUPTED, $lost->fresh()->reason_code);
+        $this->assertSame(MediaImport::STATUS_QUEUED, $fresh->fresh()->status);
+        Queue::assertNothingPushed();
+    }
+
     private function runJob(MediaImport $import): void
     {
         app()->call([new ProcessYoutubeImport($import->fresh()), 'handle']);
@@ -250,10 +365,11 @@ class YoutubeImportJobTest extends TestCase
 
     /**
      * Stand-in for yt-dlp: writes the files the real binary would into the scratch dir.
+     * $duringDownload runs while the audio "downloads" (to race other actors against the worker).
      *
      * @param  array<string, mixed>  $info
      */
-    private function fakeYtDlp(array $info = [], bool $expectDownload = true): void
+    private function fakeYtDlp(array $info = [], bool $expectDownload = true, ?callable $duringDownload = null): void
     {
         $info = [
             'id' => 'Ex4mpleVid0',
@@ -267,7 +383,7 @@ class YoutubeImportJobTest extends TestCase
             ...$info,
         ];
 
-        $this->mock(YtDlp::class, function (MockInterface $mock) use ($info, $expectDownload) {
+        $this->mock(YtDlp::class, function (MockInterface $mock) use ($info, $expectDownload, $duringDownload) {
             $mock->shouldReceive('fetchMetadata')->once()->andReturnUsing(function (string $url, string $workDir) use ($info) {
                 $this->assertSame('https://www.youtube.com/watch?v=Ex4mpleVid0', $url);
                 file_put_contents("{$workDir}/media.info.json", json_encode($info));
@@ -284,8 +400,12 @@ class YoutubeImportJobTest extends TestCase
                 return;
             }
 
-            $download->once()->andReturnUsing(function (string $infoPath, string $workDir) {
+            $download->once()->andReturnUsing(function (string $infoPath, string $workDir) use ($duringDownload) {
                 file_put_contents("{$workDir}/media.m4a", str_repeat('a', self::AUDIO_BYTES));
+
+                if ($duringDownload) {
+                    $duringDownload();
+                }
 
                 return "{$workDir}/media.m4a";
             });
