@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Like;
+use App\Models\MediaImport;
 use App\Models\Playlist;
 use App\Models\Track;
 use App\Models\User;
@@ -73,5 +74,44 @@ class IsolationApiTest extends TestCase
         $this->getJson('/api/likes')
             ->assertOk()
             ->assertJsonCount(0, 'data');
+    }
+
+    public function test_imported_youtube_track_is_as_private_as_an_upload(): void
+    {
+        $a = User::factory()->create();
+        $b = User::factory()->create();
+        $track = Track::factory()->for($a, 'owner')->create([
+            'source' => 'youtube',
+            'source_id' => 'Ex4mpleVid0',
+            'cover_path' => 'covers/x.jpg',
+        ]);
+
+        Sanctum::actingAs($b);
+
+        $this->getJson('/api/tracks')->assertOk()->assertJsonCount(0, 'data');
+        $this->getJson("/api/tracks/{$track->id}")->assertForbidden();
+        $this->deleteJson("/api/tracks/{$track->id}")->assertForbidden();
+        $this->getJson("/api/tracks/{$track->id}/stream")->assertForbidden();
+        $this->getJson("/api/tracks/{$track->id}/cover")->assertForbidden();
+        $this->postJson("/api/tracks/{$track->id}/like")->assertNotFound();
+    }
+
+    public function test_user_cannot_see_or_touch_foreign_imports(): void
+    {
+        $a = User::factory()->create();
+        $b = User::factory()->create();
+        $import = MediaImport::factory()->for($a, 'owner')->create([
+            'status' => MediaImport::STATUS_FAILED,
+            'thumbnail_path' => 'covers/thumb.jpg',
+        ]);
+
+        Sanctum::actingAs($b);
+
+        $this->getJson('/api/imports')->assertOk()->assertJsonCount(0, 'data');
+        $this->getJson("/api/imports/{$import->id}")->assertNotFound();
+        $this->postJson("/api/imports/{$import->id}/retry")->assertNotFound();
+        $this->deleteJson("/api/imports/{$import->id}")->assertNotFound();
+        $this->getJson("/api/imports/{$import->id}/thumbnail")->assertForbidden();
+        $this->assertModelExists($import);
     }
 }
