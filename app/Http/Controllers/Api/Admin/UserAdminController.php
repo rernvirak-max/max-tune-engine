@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Services\YoutubeImportService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -19,7 +20,7 @@ class UserAdminController extends Controller
         return response()->json(['data' => $users]);
     }
 
-    public function disable(Request $request, User $user): JsonResponse
+    public function disable(Request $request, User $user, YoutubeImportService $imports): JsonResponse
     {
         if ($user->id === $request->user()->id) {
             return response()->json(['message' => 'You cannot disable yourself.'], 422);
@@ -32,6 +33,7 @@ class UserAdminController extends Controller
         $user->status = 'disabled';
         $user->save();
         $user->tokens()->delete();
+        $imports->cancelQueued($user);
 
         return response()->json(['data' => $this->payload($user->fresh())]);
     }

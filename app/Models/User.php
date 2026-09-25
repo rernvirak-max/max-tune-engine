@@ -74,4 +74,9 @@ class User extends Authenticatable
     {
         return $this->hasMany(InviteCode::class, 'created_by');
     }
+
+    public function mediaImports(): HasMany
+    {
+        return $this->hasMany(MediaImport::class);
+    }
 }
