@@ -20,6 +20,7 @@ class AudioMetadataExtractor
     {
         $analyzer = new getID3;
         $info = $analyzer->analyze($absolutePath);
+        $analyzer->CopyTagsToComments($info);
 
         $tags = $this->flattenTags($info);
         $durationMs = isset($info['playtime_seconds'])

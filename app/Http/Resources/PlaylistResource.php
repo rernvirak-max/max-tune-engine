@@ -44,10 +44,11 @@ class PlaylistResource extends JsonResource
             return null;
         }
 
-        return URL::temporarySignedRoute(
+        return TrackResource::absoluteMediaUrl(URL::temporarySignedRoute(
             'api.tracks.cover',
             now()->addHours(6),
             ['track' => $first->id],
-        );
+            absolute: false,
+        ));
     }
 }
