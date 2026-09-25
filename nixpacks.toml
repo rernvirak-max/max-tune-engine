@@ -1,0 +1,8 @@
+# Nixpacks config for Coolify deploys.
+#
+# Nix's PHP ships without a php.ini, so PHP's built-in defaults apply
+# (2M upload_max_filesize / 8M post_max_size). Point PHP at the repo's
+# php.ini; `php artisan serve` and its `php -S` child both read PHPRC.
+
+[variables]
+PHPRC = '/app/php.ini'
