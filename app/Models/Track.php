@@ -23,6 +23,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
     'cover_path',
     'visibility',
     'source',
+    'source_id',
     'external_id',
     'license_url',
     'import_mode',

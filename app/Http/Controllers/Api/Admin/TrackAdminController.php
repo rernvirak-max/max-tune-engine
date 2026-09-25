@@ -4,7 +4,7 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Track;
-use App\Services\MediaStorage;
+use App\Services\TrackRemover;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -49,19 +49,9 @@ class TrackAdminController extends Controller
         return response()->json(['data' => $tracks]);
     }
 
-    public function destroy(Request $request, Track $track, MediaStorage $media): JsonResponse
+    public function destroy(Request $request, Track $track, TrackRemover $remover): JsonResponse
     {
-        $owner = $track->owner;
-        $size = (int) $track->size;
-
-        $media->delete($track->storage_path);
-        $media->delete($track->cover_path);
-        $track->delete();
-
-        if ($owner && $size > 0) {
-            $owner->storage_used_bytes = max(0, (int) $owner->storage_used_bytes - $size);
-            $owner->save();
-        }
+        $remover->remove($track);
 
         return response()->json(['message' => 'Track removed']);
     }
