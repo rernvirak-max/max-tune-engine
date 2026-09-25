@@ -3,6 +3,22 @@
 # Nix's PHP ships without a php.ini, so PHP's built-in defaults apply
 # (2M upload_max_filesize / 8M post_max_size). Point PHP at the repo's
 # php.ini; `php artisan serve` and its `php -S` child both read PHPRC.
+#
+# Add from YouTube link: the queue worker needs yt-dlp, ffmpeg (m4a remux +
+# jpg thumbnails) and deno (yt-dlp's default JS runtime for YouTube).
+# yt-dlp is the pinned official standalone binary (no Python needed); bump
+# YTDLP_VERSION and redeploy when YouTube breaks it.
 
 [variables]
 PHPRC = '/app/php.ini'
+YTDLP_VERSION = '2026.08.19'
+YTDLP_BINARY = '/app/bin/yt-dlp'
+
+[phases.setup]
+nixPkgs = ['...', 'ffmpeg', 'deno']
+
+[phases.install]
+cmds = [
+    '...',
+    'mkdir -p /app/bin && curl -fsSL -o /app/bin/yt-dlp "https://github.com/yt-dlp/yt-dlp/releases/download/${YTDLP_VERSION}/yt-dlp_linux" && chmod +x /app/bin/yt-dlp && /app/bin/yt-dlp --version',
+]
