@@ -1,5 +1,9 @@
 <?php
 
+use App\Http\Controllers\Api\Admin\InviteController as AdminInviteController;
+use App\Http\Controllers\Api\Admin\TrackAdminController;
+use App\Http\Controllers\Api\Admin\UserAdminController;
+use App\Http\Controllers\Api\AppConfigController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CatalogController;
 use App\Http\Controllers\Api\LikeController;
@@ -7,6 +11,8 @@ use App\Http\Controllers\Api\MeController;
 use App\Http\Controllers\Api\PlaylistController;
 use App\Http\Controllers\Api\TrackController;
 use Illuminate\Support\Facades\Route;
+
+Route::get('app', [AppConfigController::class, 'show']);
 
 Route::prefix('auth')->group(function () {
     Route::post('login', [AuthController::class, 'login']);
@@ -17,7 +23,7 @@ Route::prefix('auth')->group(function () {
     });
 });
 
-Route::middleware('auth:sanctum')->group(function () {
+Route::middleware(['auth:sanctum', 'active'])->group(function () {
     Route::get('me', [MeController::class, 'show']);
 
     Route::get('tracks', [TrackController::class, 'index']);
@@ -39,6 +45,20 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('catalog/jamendo', [CatalogController::class, 'searchJamendo']);
     Route::post('catalog/jamendo/import', [CatalogController::class, 'importJamendo']);
+
+    Route::middleware('admin')->prefix('admin')->group(function () {
+        Route::get('invites', [AdminInviteController::class, 'index']);
+        Route::post('invites', [AdminInviteController::class, 'store']);
+        Route::post('invites/{invite}/revoke', [AdminInviteController::class, 'revoke']);
+
+        Route::get('users', [UserAdminController::class, 'index']);
+        Route::post('users/{user}/disable', [UserAdminController::class, 'disable']);
+        Route::post('users/{user}/enable', [UserAdminController::class, 'enable']);
+        Route::patch('users/{user}/quota', [UserAdminController::class, 'updateQuota']);
+
+        Route::get('tracks', [TrackAdminController::class, 'index']);
+        Route::delete('tracks/{track}', [TrackAdminController::class, 'destroy']);
+    });
 });
 
 // Media URLs: temporary signed OR owner bearer

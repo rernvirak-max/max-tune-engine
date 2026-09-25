@@ -12,6 +12,7 @@ use App\Services\TrackUploadService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\RateLimiter;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -39,8 +40,24 @@ class TrackController extends Controller
 
     public function store(StoreTrackRequest $request, TrackUploadService $uploads): JsonResponse
     {
+        $user = $request->user();
+        $key = 'uploads:'.$user->id;
+        $maxAttempts = (int) config('max-tune.upload_rate_limit', 20);
+        $decay = (int) config('max-tune.upload_rate_decay_seconds', 3600);
+
+        if (RateLimiter::tooManyAttempts($key, $maxAttempts)) {
+            return response()->json([
+                'message' => 'Upload limit reached · Try again in an hour',
+                'errors' => [
+                    'file' => ['Upload limit reached · Try again in an hour'],
+                ],
+            ], 429);
+        }
+
+        RateLimiter::hit($key, $decay);
+
         $track = $uploads->upload(
-            $request->user(),
+            $user,
             $request->file('file'),
         );
 

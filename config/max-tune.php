@@ -8,7 +8,7 @@ return [
     |--------------------------------------------------------------------------
     |
     | personal — single-user / register disabled
-    | invite   — invite codes or admin approve
+    | invite   — invite codes required to register
     | public   — open registration
     |
     */
@@ -19,10 +19,6 @@ return [
     |--------------------------------------------------------------------------
     | Media disk
     |--------------------------------------------------------------------------
-    |
-    | Local first; point MEDIA_DISK / FILESYSTEM at S3-compatible later
-    | without rewriting domain logic.
-    |
     */
 
     'media_disk' => env('MEDIA_DISK', 'media'),
@@ -39,8 +35,15 @@ return [
 
     'allowed_audio_extensions' => ['mp3', 'm4a', 'flac', 'wav'],
 
-    /** Max upload size in kilobytes (Laravel File::max) */
-    'max_upload_kb' => (int) env('MAX_UPLOAD_KB', 102400),
+    /** Max upload size in kilobytes (Laravel File::max) — default 50 MB */
+    'max_upload_kb' => (int) env('MAX_UPLOAD_KB', 51200),
+
+    /** Default per-user storage quota in bytes — 5 GB */
+    'default_storage_quota_bytes' => (int) env('DEFAULT_STORAGE_QUOTA_BYTES', 5 * 1024 * 1024 * 1024),
+
+    /** Upload rate limit per user */
+    'upload_rate_limit' => (int) env('UPLOAD_RATE_LIMIT', 20),
+    'upload_rate_decay_seconds' => (int) env('UPLOAD_RATE_DECAY_SECONDS', 3600),
 
     'jamendo' => [
         'client_id' => env('JAMENDO_CLIENT_ID'),

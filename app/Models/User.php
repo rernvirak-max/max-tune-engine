@@ -11,7 +11,7 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 
-#[Fillable(['name', 'email', 'password', 'role', 'storage_used_bytes', 'status'])]
+#[Fillable(['name', 'email', 'password', 'role', 'storage_used_bytes', 'storage_quota_bytes', 'status'])]
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable
 {
@@ -27,6 +27,7 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'storage_used_bytes' => 'integer',
+            'storage_quota_bytes' => 'integer',
         ];
     }
 
@@ -38,6 +39,20 @@ class User extends Authenticatable
     public function isActive(): bool
     {
         return $this->status === 'active';
+    }
+
+    public function storageQuotaBytes(): int
+    {
+        if ($this->storage_quota_bytes !== null) {
+            return (int) $this->storage_quota_bytes;
+        }
+
+        return (int) config('max-tune.default_storage_quota_bytes', 5 * 1024 * 1024 * 1024);
+    }
+
+    public function storageRemainingBytes(): int
+    {
+        return max(0, $this->storageQuotaBytes() - (int) $this->storage_used_bytes);
     }
 
     public function tracks(): HasMany
@@ -53,5 +68,10 @@ class User extends Authenticatable
     public function likes(): HasMany
     {
         return $this->hasMany(Like::class);
+    }
+
+    public function createdInvites(): HasMany
+    {
+        return $this->hasMany(InviteCode::class, 'created_by');
     }
 }
