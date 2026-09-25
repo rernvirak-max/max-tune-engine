@@ -244,6 +244,25 @@ class YoutubeImportJobTest extends TestCase
         $this->assertSame('imports', $job->queue);
         $this->assertSame('database', $connection['driver']);
         $this->assertGreaterThan($job->timeout, $connection['retry_after'], 'retry_after must outlive the job or it runs twice');
+
+        // Safety net: a worker started on the default connection by mistake
+        // must not re-deliver a running import either.
+        $this->assertGreaterThan($job->timeout, config('queue.connections.database.retry_after'));
+    }
+
+    public function test_procfile_worker_runs_on_the_imports_connection_with_the_job_timeout(): void
+    {
+        $job = new ProcessYoutubeImport(MediaImport::factory()->create());
+        $procfile = (string) file_get_contents(base_path('Procfile'));
+
+        $this->assertMatchesRegularExpression('/^worker: (.+)$/m', $procfile);
+        preg_match('/^worker: (.+)$/m', $procfile, $worker);
+
+        $this->assertSame(
+            "php artisan queue:work {$job->connection} --queue={$job->queue} --timeout={$job->timeout} --tries=1 --sleep=3",
+            trim($worker[1]),
+        );
+        $this->assertMatchesRegularExpression('/^scheduler: php artisan schedule:work$/m', $procfile);
     }
 
     public function test_double_retry_queues_once_and_creates_one_track(): void

@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Exceptions\MediaImportFailedException;
 use App\Models\MediaImport;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Symfony\Component\Process\Exception\ProcessTimedOutException;
 use Symfony\Component\Process\Exception\RuntimeException as ProcessRuntimeException;
@@ -185,12 +186,36 @@ class YtDlp
 
     /**
      * Best effort after a timeout: Symfony kills yt-dlp itself, but its ffmpeg
-     * child would keep running. Only processes working on this import have
-     * its scratch dir in their argv.
+     * child (already re-parented by then) would keep running. Only processes
+     * working on this import have its scratch dir in their argv, so match that
+     * path as a plain substring of /proc/<pid>/cmdline: no regex to escape and
+     * no dependency on procps/pkill.
      */
     private function killStragglers(string $workDir): void
     {
-        (new Process(['pkill', '-KILL', '-f', preg_quote($workDir.DIRECTORY_SEPARATOR)]))->run();
+        $needle = rtrim($workDir, DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR;
+        $cmdlines = glob('/proc/[0-9]*/cmdline') ?: [];
+
+        if ($cmdlines === []) {
+            Log::warning('yt-dlp timed out; /proc is unavailable, so child processes were not cleaned up.', ['work_dir' => $workDir]);
+
+            return;
+        }
+
+        foreach ($cmdlines as $file) {
+            $pid = (int) basename(dirname($file));
+            $cmdline = @file_get_contents($file);
+
+            if ($pid === getmypid() || $cmdline === false || ! str_contains($cmdline, $needle)) {
+                continue;
+            }
+
+            if (function_exists('posix_kill')) {
+                @posix_kill($pid, 9);
+            } else {
+                (new Process(['kill', '-KILL', (string) $pid]))->run();
+            }
+        }
     }
 
     private function binary(): string

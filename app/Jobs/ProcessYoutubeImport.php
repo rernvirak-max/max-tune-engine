@@ -13,7 +13,14 @@ use Throwable;
 /**
  * One attempt at a YouTube import. Runs once; blocked-by-YouTube retries are
  * re-dispatched with backoff by the processor itself. Connection, queue and
- * timeout come from config so correctness doesn't depend on worker flags.
+ * timeout come from config.
+ *
+ * Correctness requires the worker to pull from the `database-imports`
+ * connection: Laravel applies the retry_after of the connection the worker
+ * runs on, and only that one outlives this job's $timeout. Run exactly:
+ *   php artisan queue:work database-imports --queue=imports --timeout=660 --tries=1 --sleep=3
+ * (The default `database` connection's retry_after is also kept above 660 as a
+ * safety net, see config/queue.php.)
  */
 class ProcessYoutubeImport implements ShouldQueue
 {

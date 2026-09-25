@@ -28,7 +28,8 @@ class YtDlpProcessTest extends TestCase
         Storage::fake('local');
 
         $this->root = storage_path('framework/testing/yt-dlp-'.uniqid());
-        $this->workDir = $this->root.'/work';
+        // Regex metacharacters in the path: straggler cleanup must match it literally.
+        $this->workDir = $this->root.'/work+(1).[x]';
         File::ensureDirectoryExists($this->workDir);
     }
 
