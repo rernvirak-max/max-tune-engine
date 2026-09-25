@@ -46,11 +46,12 @@ class TrackResource extends JsonResource
             return null;
         }
 
-        return URL::temporarySignedRoute(
+        return self::absoluteMediaUrl(URL::temporarySignedRoute(
             'api.tracks.cover',
             now()->addHours(6),
             ['track' => $this->id],
-        );
+            absolute: false,
+        ));
     }
 
     private function streamUrl(): ?string
@@ -63,10 +64,20 @@ class TrackResource extends JsonResource
             return null;
         }
 
-        return URL::temporarySignedRoute(
+        return self::absoluteMediaUrl(URL::temporarySignedRoute(
             'api.tracks.stream',
             now()->addHours(6),
             ['track' => $this->id],
-        );
+            absolute: false,
+        ));
+    }
+
+    /**
+     * Signatures cover path + query only, so they survive TLS termination at
+     * Cloudflare/Traefik; the public origin comes from APP_URL (https in prod).
+     */
+    public static function absoluteMediaUrl(string $relative): string
+    {
+        return rtrim((string) config('app.url'), '/').$relative;
     }
 }

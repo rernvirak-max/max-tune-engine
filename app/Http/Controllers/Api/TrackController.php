@@ -120,7 +120,7 @@ class TrackController extends Controller
 
     private function authorizeStreamAccess(Request $request, Track $track): void
     {
-        if ($request->hasValidSignature()) {
+        if ($request->hasValidSignature(absolute: false)) {
             return;
         }
 
