@@ -5,6 +5,7 @@ namespace App\Services;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Storage;
+use RuntimeException;
 
 /**
  * Admin-provided YouTube cookies.txt, encrypted with APP_KEY on the private
@@ -36,9 +37,17 @@ class YoutubeCookieStore
             return null;
         }
 
+        // tempnam() creates the file 0600 before anything is written; the rename is atomic.
         $file = $directory.DIRECTORY_SEPARATOR.self::FILE_NAME;
-        file_put_contents($file, Crypt::decryptString((string) $this->disk()->get($this->path())));
-        chmod($file, self::FILE_MODE);
+        $temp = tempnam($directory, self::FILE_NAME);
+
+        if ($temp === false) {
+            throw new RuntimeException('Could not create the YouTube cookies file.');
+        }
+
+        chmod($temp, self::FILE_MODE);
+        file_put_contents($temp, Crypt::decryptString((string) $this->disk()->get($this->path())));
+        rename($temp, $file);
 
         return $file;
     }

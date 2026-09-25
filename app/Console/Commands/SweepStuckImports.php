@@ -10,7 +10,7 @@ use Illuminate\Console\Command;
 use Illuminate\Support\Facades\File;
 
 #[Signature('imports:sweep')]
-#[Description('Fail YouTube imports stuck past the job timeout and delete orphaned scratch files')]
+#[Description('Fail YouTube imports stuck past the job timeout or never picked up, and delete orphaned scratch files')]
 class SweepStuckImports extends Command
 {
     public function handle(YoutubeImportProcessor $processor): int
@@ -30,9 +30,22 @@ class SweepStuckImports extends Command
             'Marked interrupted by imports:sweep (no progress since '.$import->updated_at?->toIso8601String().').',
         ));
 
+        // A lost job would otherwise hold an active slot (and block a re-submit) forever.
+        $expired = MediaImport::query()
+            ->where('status', MediaImport::STATUS_QUEUED)
+            ->where('updated_at', '<', now()->subSeconds((int) config('max-tune.youtube.queued_expiry_seconds')))
+            ->get();
+
+        $expired->each(fn (MediaImport $import) => $processor->fail(
+            $import,
+            MediaImport::REASON_INTERRUPTED,
+            'Expired by imports:sweep (queued since '.$import->updated_at?->toIso8601String().', never picked up).',
+            [MediaImport::STATUS_QUEUED],
+        ));
+
         $orphanDirs = $this->deleteOrphanWorkDirs();
 
-        $this->info("Interrupted {$stuck->count()} stuck import(s); removed {$orphanDirs} orphaned scratch dir(s).");
+        $this->info("Interrupted {$stuck->count()} stuck and {$expired->count()} expired queued import(s); removed {$orphanDirs} orphaned scratch dir(s).");
 
         return self::SUCCESS;
     }

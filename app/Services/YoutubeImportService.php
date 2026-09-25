@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Exceptions\ImportRejectedException;
 use App\Jobs\ProcessYoutubeImport;
 use App\Models\MediaImport;
+use App\Models\Track;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
@@ -44,25 +45,30 @@ class YoutubeImportService
     }
 
     /**
-     * Re-queue a failed import with the same checks as a new submission.
+     * Re-queue a failed import with the same checks as a new submission. The
+     * row is locked and re-checked so two concurrent retries queue it once.
      *
      * @throws ImportRejectedException
      */
     public function retry(MediaImport $import): MediaImport
     {
-        if ($import->status !== MediaImport::STATUS_FAILED) {
-            throw ImportRejectedException::notAllowed('Only failed imports can be retried.');
-        }
-
         DB::transaction(function () use ($import) {
-            $this->admit($this->lockUser($import->owner), $import->video_id, $import);
+            $locked = $this->lockImport($import);
 
-            $import->update([
+            if ($locked?->status !== MediaImport::STATUS_FAILED) {
+                throw ImportRejectedException::notAllowed('Only failed imports can be retried.');
+            }
+
+            $this->admit($this->lockUser($locked->owner), $locked->video_id, $locked);
+
+            $locked->update([
                 'status' => MediaImport::STATUS_QUEUED,
                 'reason_code' => null,
                 'error_detail' => null,
                 'attempts' => 0,
             ]);
+
+            $import->setRawAttributes($locked->getAttributes(), true);
         });
 
         ProcessYoutubeImport::dispatch($import);
@@ -71,17 +77,30 @@ class YoutubeImportService
     }
 
     /**
-     * Delete an import that no worker holds, with its thumbnail and scratch files.
+     * Delete an import that no worker holds, with its thumbnail and scratch
+     * files. Locked and re-checked so a worker can't claim it mid-delete.
+     * Returns the track of a ready import (the caller decides whether it goes too).
      *
      * @throws ImportRejectedException while downloading/processing (no cancel in v1)
      */
-    public function discard(MediaImport $import): void
+    public function discard(MediaImport $import): ?Track
     {
-        if ($import->isRunning()) {
-            throw ImportRejectedException::notAllowed('Can\'t cancel while downloading.');
-        }
+        return DB::transaction(function () use ($import) {
+            $locked = $this->lockImport($import);
 
-        $this->purge($import);
+            if ($locked === null) {
+                return null;
+            }
+
+            if ($locked->isRunning()) {
+                throw ImportRejectedException::notAllowed('Can\'t cancel while downloading.');
+            }
+
+            $track = $locked->track;
+            $this->purge($locked);
+
+            return $track;
+        });
     }
 
     /**
@@ -92,7 +111,13 @@ class YoutubeImportService
         $user->mediaImports()
             ->where('status', MediaImport::STATUS_QUEUED)
             ->get()
-            ->each(fn (MediaImport $import) => $this->purge($import));
+            ->each(function (MediaImport $import) {
+                try {
+                    $this->discard($import);
+                } catch (ImportRejectedException) {
+                    // A worker claimed it meanwhile; it settles on its own.
+                }
+            });
     }
 
     private function purge(MediaImport $import): void
@@ -103,7 +128,15 @@ class YoutubeImportService
         }
 
         File::deleteDirectory($import->workDir());
-        $import->delete();
+        MediaImport::query()
+            ->whereKey($import->id)
+            ->whereNotIn('status', MediaImport::RUNNING_STATUSES)
+            ->delete();
+    }
+
+    private function lockImport(MediaImport $import): ?MediaImport
+    {
+        return MediaImport::query()->whereKey($import->id)->lockForUpdate()->first();
     }
 
     private function lockUser(User $user): User

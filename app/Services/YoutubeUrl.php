@@ -31,7 +31,8 @@ class YoutubeUrl
         $scheme = strtolower($parts['scheme'] ?? '');
         $host = strtolower($parts['host'] ?? '');
         $segments = array_values(array_filter(explode('/', $parts['path'] ?? '')));
-        parse_str($parts['query'] ?? '', $query);
+        $rawQuery = $parts['query'] ?? '';
+        parse_str($rawQuery, $query);
 
         if (! in_array($scheme, ['http', 'https'], true)) {
             throw ImportRejectedException::invalidUrl();
@@ -39,7 +40,7 @@ class YoutubeUrl
 
         $candidate = match (true) {
             in_array($host, self::SHORT_HOSTS, true) => $segments[0] ?? null,
-            in_array($host, self::WATCH_HOSTS, true) => $this->watchHostVideoId($segments, $query),
+            in_array($host, self::WATCH_HOSTS, true) => $this->watchHostVideoId($segments, $query, $rawQuery),
             default => null,
         };
 
@@ -59,12 +60,17 @@ class YoutubeUrl
      * @param  list<string>  $segments
      * @param  array<string, mixed>  $query
      */
-    private function watchHostVideoId(array $segments, array $query): ?string
+    private function watchHostVideoId(array $segments, array $query, string $rawQuery): ?string
     {
         $first = $segments[0] ?? '';
 
         if ($first === 'shorts') {
             return $segments[1] ?? null;
+        }
+
+        // Ambiguous `v=a&v=b` is invalid (parse_str would silently keep the last one); the SPA parser agrees.
+        if ($first === 'watch' && $this->parameterCount($rawQuery, 'v') > 1) {
+            return null;
         }
 
         if ($first === 'watch' && isset($query['v'])) {
@@ -77,5 +83,15 @@ class YoutubeUrl
         }
 
         return null;
+    }
+
+    private function parameterCount(string $rawQuery, string $name): int
+    {
+        $names = array_map(
+            fn (string $pair) => urldecode(explode('=', $pair, 2)[0]),
+            explode('&', $rawQuery),
+        );
+
+        return count(array_keys($names, $name, true));
     }
 }

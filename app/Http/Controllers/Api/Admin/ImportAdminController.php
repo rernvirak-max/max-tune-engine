@@ -10,6 +10,7 @@ use App\Services\YoutubeImportService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Support\Facades\DB;
 
 class ImportAdminController extends Controller
 {
@@ -26,7 +27,8 @@ class ImportAdminController extends Controller
     }
 
     /**
-     * Ready imports also lose their track and files (same removal as Admin → Tracks).
+     * Ready imports also lose their track and files (same removal as Admin → Tracks),
+     * in one transaction with the import row.
      */
     public function destroy(
         Request $request,
@@ -34,13 +36,13 @@ class ImportAdminController extends Controller
         YoutubeImportService $imports,
         TrackRemover $remover,
     ): JsonResponse {
-        $track = $mediaImport->track;
+        DB::transaction(function () use ($mediaImport, $imports, $remover) {
+            $track = $imports->discard($mediaImport);
 
-        $imports->discard($mediaImport);
-
-        if ($track) {
-            $remover->remove($track);
-        }
+            if ($track) {
+                $remover->remove($track);
+            }
+        });
 
         return response()->json(['message' => 'Import removed']);
     }
