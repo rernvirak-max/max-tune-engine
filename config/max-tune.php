@@ -66,13 +66,19 @@ return [
         'ffmpeg_binary' => env('FFMPEG_BINARY'),
         /** Optional yt-dlp --js-runtimes value (e.g. "node"); empty = yt-dlp default (deno) */
         'js_runtimes' => env('YTDLP_JS_RUNTIMES'),
+        /** Dedicated connection in config/queue.php (its retry_after outlives the job timeout) */
+        'queue_connection' => env('YOUTUBE_IMPORT_QUEUE_CONNECTION', 'database-imports'),
         'queue' => env('YOUTUBE_IMPORT_QUEUE', 'imports'),
         'max_duration_seconds' => (int) env('YOUTUBE_MAX_DURATION_SECONDS', 15 * 60),
-        /** Whole job budget (metadata + download); worker --timeout must be higher */
+        /** Whole job budget (metadata + download) */
         'job_timeout_seconds' => (int) env('YOUTUBE_JOB_TIMEOUT_SECONDS', 10 * 60),
+        /** Added to the job budget for the job's worker $timeout (cleanup + failure handling) */
+        'worker_timeout_margin_seconds' => 60,
         'version_timeout_seconds' => 10,
         /** Extra time after the job timeout before the sweep marks an import interrupted */
         'stuck_grace_seconds' => (int) env('YOUTUBE_STUCK_GRACE_SECONDS', 5 * 60),
+        /** Queued this long without a worker picking it up (lost job): the sweep fails it so it frees a slot */
+        'queued_expiry_seconds' => (int) env('YOUTUBE_QUEUED_EXPIRY_SECONDS', 30 * 60),
         'rate_limit' => (int) env('YOUTUBE_IMPORT_RATE_LIMIT', 10),
         'rate_decay_seconds' => (int) env('YOUTUBE_IMPORT_RATE_DECAY_SECONDS', 3600),
         'max_active_per_user' => (int) env('YOUTUBE_MAX_ACTIVE_IMPORTS', 2),

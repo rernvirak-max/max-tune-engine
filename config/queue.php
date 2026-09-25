@@ -44,6 +44,18 @@ return [
             'after_commit' => false,
         ],
 
+        // YouTube imports (config/max-tune.php "youtube"): retry_after must stay
+        // above the job's $timeout (job_timeout_seconds + worker margin) or a
+        // long import is handed to the worker twice.
+        'database-imports' => [
+            'driver' => 'database',
+            'connection' => env('DB_QUEUE_CONNECTION'),
+            'table' => env('DB_QUEUE_TABLE', 'jobs'),
+            'queue' => env('YOUTUBE_IMPORT_QUEUE', 'imports'),
+            'retry_after' => (int) env('YOUTUBE_QUEUE_RETRY_AFTER', 15 * 60),
+            'after_commit' => true,
+        ],
+
         'beanstalkd' => [
             'driver' => 'beanstalkd',
             'host' => env('BEANSTALKD_QUEUE_HOST', 'localhost'),

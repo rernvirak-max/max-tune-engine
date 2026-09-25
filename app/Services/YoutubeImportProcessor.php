@@ -5,7 +5,7 @@ namespace App\Services;
 use App\Exceptions\MediaImportFailedException;
 use App\Jobs\ProcessYoutubeImport;
 use App\Models\MediaImport;
-use App\Models\Track;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
 use Illuminate\Validation\ValidationException;
 use Throwable;
@@ -37,20 +37,24 @@ class YoutubeImportProcessor
 
     public function process(MediaImport $import): void
     {
+        if (! $this->claim($import)) {
+            return;
+        }
+
         $deadline = microtime(true) + (int) config('max-tune.youtube.job_timeout_seconds');
         $workDir = $import->workDir();
 
+        // Created only after the claim, so the sweep never sees a scratch dir without a running row.
         File::deleteDirectory($workDir);
         File::ensureDirectoryExists($workDir);
 
-        $import->update([
-            'status' => MediaImport::STATUS_DOWNLOADING,
-            'attempts' => $import->attempts + 1,
-        ]);
-
         try {
             $metadata = $this->ytDlp->fetchMetadata($this->urls->watchUrl($import->video_id), $workDir, $deadline - microtime(true));
-            $this->rememberMetadata($import, $metadata['info'], $metadata['thumbnail_path']);
+
+            if (! $this->rememberMetadata($import, $metadata['info'], $metadata['thumbnail_path'])) {
+                return;
+            }
+
             $this->assertImportable($metadata['info']);
 
             $audioPath = $this->ytDlp->downloadAudio(
@@ -60,15 +64,11 @@ class YoutubeImportProcessor
                 $deadline - microtime(true),
             );
 
-            $import->update(['status' => MediaImport::STATUS_PROCESSING]);
-            $track = $this->storeTrack($import, $metadata['info'], $audioPath);
+            if (! $this->advance($import, MediaImport::STATUS_DOWNLOADING, MediaImport::STATUS_PROCESSING)) {
+                return;
+            }
 
-            $import->update([
-                'status' => MediaImport::STATUS_READY,
-                'track_id' => $track->id,
-                'reason_code' => null,
-                'error_detail' => null,
-            ]);
+            $this->storeTrack($import, $metadata['info'], $audioPath);
         } catch (MediaImportFailedException $e) {
             $this->fail($import, $e->reason, $e->detail);
         } catch (Throwable $e) {
@@ -80,37 +80,85 @@ class YoutubeImportProcessor
     }
 
     /**
+     * Settle an import a worker holds (or, for the sweep, one never picked up).
      * Blocked by YouTube: back to queued (the user sees "Queued") and retry
      * with backoff until the configured delays run out, then fail for real.
+     * Conditional on the row still being in one of $from, so a ready, dismissed
+     * or re-queued import is never overwritten.
+     *
+     * @param  list<string>  $from
      */
-    public function fail(MediaImport $import, string $reason, ?string $detail = null): void
-    {
+    public function fail(
+        MediaImport $import,
+        string $reason,
+        ?string $detail = null,
+        array $from = MediaImport::RUNNING_STATUSES,
+    ): void {
         $delays = (array) config('max-tune.youtube.blocked_retry_delays_seconds');
         $retryDelay = $delays[$import->attempts - 1] ?? null;
+        $retrying = $reason === MediaImport::REASON_BLOCKED && $retryDelay !== null;
 
-        if ($reason === MediaImport::REASON_BLOCKED && $retryDelay !== null) {
-            $import->update([
-                'status' => MediaImport::STATUS_QUEUED,
-                'reason_code' => null,
+        $settled = MediaImport::query()
+            ->whereKey($import->id)
+            ->whereIn('status', $from)
+            ->update([
+                'status' => $retrying ? MediaImport::STATUS_QUEUED : MediaImport::STATUS_FAILED,
+                'reason_code' => $retrying ? null : $reason,
                 'error_detail' => $detail,
+                'updated_at' => now(),
             ]);
 
-            ProcessYoutubeImport::dispatch($import)->delay((int) $retryDelay);
-
+        if ($settled === 0) {
             return;
         }
 
-        $import->update([
-            'status' => MediaImport::STATUS_FAILED,
-            'reason_code' => $reason,
-            'error_detail' => $detail,
+        $import->refresh();
+
+        if ($retrying) {
+            ProcessYoutubeImport::dispatch($import)->delay((int) $retryDelay);
+        }
+    }
+
+    /**
+     * Atomically move a queued import to downloading. False when another
+     * worker already holds it or it was dismissed/retried since it was queued.
+     */
+    private function claim(MediaImport $import): bool
+    {
+        return $this->advance($import, MediaImport::STATUS_QUEUED, MediaImport::STATUS_DOWNLOADING, [
+            'attempts' => DB::raw('attempts + 1'),
         ]);
     }
 
     /**
+     * Write only while the row is still in $from (a transition, or with
+     * $from === $to an attribute update). False, with nothing written, when
+     * the row is gone or has moved on, e.g. swept or dismissed meanwhile.
+     *
+     * @param  array<string, mixed>  $attributes
+     */
+    private function advance(MediaImport $import, string $from, string $to, array $attributes = []): bool
+    {
+        $moved = MediaImport::query()
+            ->whereKey($import->id)
+            ->where('status', $from)
+            ->update([...$attributes, 'status' => $to, 'updated_at' => now()]);
+
+        if ($moved === 0) {
+            return false;
+        }
+
+        $import->refresh();
+
+        return true;
+    }
+
+    /**
+     * False when the import was settled or dismissed meanwhile (its new cover is removed again).
+     *
      * @param  array<string, mixed>  $info
      */
-    private function rememberMetadata(MediaImport $import, array $info, ?string $thumbnailPath): void
+    private function rememberMetadata(MediaImport $import, array $info, ?string $thumbnailPath): bool
     {
         $attributes = [
             'title' => $this->stringOrNull($info['title'] ?? null),
@@ -122,7 +170,13 @@ class YoutubeImportProcessor
             $attributes['thumbnail_path'] = $this->media->storeCover($import->user_id, (string) file_get_contents($thumbnailPath));
         }
 
-        $import->update($attributes);
+        if ($this->advance($import, MediaImport::STATUS_DOWNLOADING, MediaImport::STATUS_DOWNLOADING, $attributes)) {
+            return true;
+        }
+
+        $this->media->delete($attributes['thumbnail_path'] ?? null);
+
+        return false;
     }
 
     /**
@@ -147,11 +201,15 @@ class YoutubeImportProcessor
     }
 
     /**
+     * Create the track and mark the import ready in one transaction, under a
+     * lock on the import row. If the row was dismissed or settled meanwhile
+     * (e.g. swept as interrupted), no track is created and the audio is removed.
+     *
      * @param  array<string, mixed>  $info
      *
      * @throws MediaImportFailedException too_large | quota_exceeded
      */
-    private function storeTrack(MediaImport $import, array $info, string $audioPath): Track
+    private function storeTrack(MediaImport $import, array $info, string $audioPath): void
     {
         $audioBytes = (int) filesize($audioPath);
 
@@ -162,21 +220,46 @@ class YoutubeImportProcessor
         $storagePath = $this->media->storeTrackAudioFile($import->user_id, $audioPath);
 
         try {
-            return $this->tracks->createWithinQuota($import->owner, [
-                'title' => $import->title ?? $import->video_id,
-                'artist_name' => $import->channel,
-                'duration_ms' => isset($info['duration']) ? (int) round((float) $info['duration'] * 1000) : null,
-                'mime' => self::AUDIO_MIME,
-                'size' => $audioBytes + $this->media->size($import->thumbnail_path),
-                'storage_path' => $storagePath,
-                'cover_path' => $import->thumbnail_path,
-                'source' => MediaImport::TRACK_SOURCE,
-                'source_id' => $import->video_id,
-            ]);
+            $track = DB::transaction(function () use ($import, $info, $audioBytes, $storagePath) {
+                $held = MediaImport::query()
+                    ->whereKey($import->id)
+                    ->where('status', MediaImport::STATUS_PROCESSING)
+                    ->lockForUpdate()
+                    ->exists();
+
+                if (! $held) {
+                    return null;
+                }
+
+                $track = $this->tracks->createWithinQuota($import->owner, [
+                    'title' => $import->title ?? $import->video_id,
+                    'artist_name' => $import->channel,
+                    'duration_ms' => isset($info['duration']) ? (int) round((float) $info['duration'] * 1000) : null,
+                    'mime' => self::AUDIO_MIME,
+                    'size' => $audioBytes + $this->media->size($import->thumbnail_path),
+                    'storage_path' => $storagePath,
+                    'cover_path' => $import->thumbnail_path,
+                    'source' => MediaImport::TRACK_SOURCE,
+                    'source_id' => $import->video_id,
+                ]);
+
+                $import->update([
+                    'status' => MediaImport::STATUS_READY,
+                    'track_id' => $track->id,
+                    'reason_code' => null,
+                    'error_detail' => null,
+                ]);
+
+                return $track;
+            });
         } catch (Throwable $e) {
             $this->media->delete($storagePath);
 
             throw $e instanceof ValidationException ? new MediaImportFailedException(MediaImport::REASON_QUOTA) : $e;
+        }
+
+        if ($track === null) {
+            $this->media->delete($storagePath);
         }
     }
 
