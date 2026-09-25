@@ -79,6 +79,8 @@ return [
         'stuck_grace_seconds' => (int) env('YOUTUBE_STUCK_GRACE_SECONDS', 5 * 60),
         /** Queued this long without a worker picking it up (lost job): the sweep fails it so it frees a slot */
         'queued_expiry_seconds' => (int) env('YOUTUBE_QUEUED_EXPIRY_SECONDS', 30 * 60),
+        /** Failed imports (and their thumbnails) are deleted by the sweep this many days after failing */
+        'failed_retention_days' => (int) env('YOUTUBE_FAILED_RETENTION_DAYS', 7),
         'rate_limit' => (int) env('YOUTUBE_IMPORT_RATE_LIMIT', 10),
         'rate_decay_seconds' => (int) env('YOUTUBE_IMPORT_RATE_DECAY_SECONDS', 3600),
         'max_active_per_user' => (int) env('YOUTUBE_MAX_ACTIVE_IMPORTS', 2),

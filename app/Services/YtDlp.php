@@ -29,23 +29,50 @@ class YtDlp
     private const TOO_LARGE_MARKER = 'larger than max-filesize';
 
     /**
-     * Lower-cased yt-dlp error fragments → reason codes. First match wins, so
-     * bot checks come before the generic "sign in" private-video wording.
+     * yt-dlp error fragments → reason codes, matched against the normalised
+     * (lower-cased, straight apostrophes, single spaces) stderr. First match
+     * wins, so the order matters:
+     * - blocks and rate limits first ("sign in to confirm you're not a bot",
+     *   "this content isn't available, try again later", 403/429),
+     * - then the specific wordings before the generic "not available".
+     * Most texts are YouTube's playability reasons that yt-dlp 2026.08.19
+     * passes through (extractor/youtube/_video.py), plus yt-dlp's own
+     * geo-restriction and format messages.
      */
     private const ERROR_REASONS = [
         'not a bot' => MediaImport::REASON_BLOCKED,
+        'try again later' => MediaImport::REASON_BLOCKED,
+        'captcha' => MediaImport::REASON_BLOCKED,
+        'http error 403' => MediaImport::REASON_BLOCKED,
         'http error 429' => MediaImport::REASON_BLOCKED,
         'too many requests' => MediaImport::REASON_BLOCKED,
         'confirm your age' => MediaImport::REASON_AGE_RESTRICTED,
         'age-restricted' => MediaImport::REASON_AGE_RESTRICTED,
+        'age restricted' => MediaImport::REASON_AGE_RESTRICTED,
+        'inappropriate for some users' => MediaImport::REASON_AGE_RESTRICTED,
         'private video' => MediaImport::REASON_PRIVATE,
+        'video is private' => MediaImport::REASON_PRIVATE,
         'members-only' => MediaImport::REASON_PRIVATE,
+        'members only' => MediaImport::REASON_PRIVATE,
+        "channel's members" => MediaImport::REASON_PRIVATE,
+        'premium members' => MediaImport::REASON_PRIVATE,
         'live event will begin' => MediaImport::REASON_LIVE,
         'premieres in' => MediaImport::REASON_LIVE,
-        'video unavailable' => MediaImport::REASON_UNAVAILABLE,
-        'not available' => MediaImport::REASON_UNAVAILABLE,
+        'premiere will begin' => MediaImport::REASON_LIVE,
+        'live stream recording is not available' => MediaImport::REASON_LIVE,
         'available in your country' => MediaImport::REASON_UNAVAILABLE,
+        'blocked it in your country' => MediaImport::REASON_UNAVAILABLE,
+        'from your location' => MediaImport::REASON_UNAVAILABLE,
+        'geo restriction' => MediaImport::REASON_UNAVAILABLE,
+        // A format problem, not the video: keep it retryable instead of "unavailable".
+        'requested format is not available' => MediaImport::REASON_UNKNOWN,
+        'video unavailable' => MediaImport::REASON_UNAVAILABLE,
+        'video is unavailable' => MediaImport::REASON_UNAVAILABLE,
+        "content isn't available" => MediaImport::REASON_UNAVAILABLE,
+        'no longer available' => MediaImport::REASON_UNAVAILABLE,
         'has been removed' => MediaImport::REASON_UNAVAILABLE,
+        'has been terminated' => MediaImport::REASON_UNAVAILABLE,
+        'not available' => MediaImport::REASON_UNAVAILABLE,
     ];
 
     public function __construct(private YoutubeCookieStore $cookies) {}
@@ -210,8 +237,9 @@ class YtDlp
                 continue;
             }
 
-            if (function_exists('posix_kill')) {
-                @posix_kill($pid, 9);
+            // SIGKILL comes from ext-pcntl (which the queue worker needs for timeouts anyway).
+            if (function_exists('posix_kill') && defined('SIGKILL')) {
+                @posix_kill($pid, SIGKILL);
             } else {
                 (new Process(['kill', '-KILL', (string) $pid]))->run();
             }
@@ -225,7 +253,8 @@ class YtDlp
 
     private function reasonFor(string $stderr): string
     {
-        $haystack = Str::lower($stderr);
+        // Case-insensitive, and robust to curly apostrophes and wrapped/extra whitespace.
+        $haystack = (string) preg_replace('/\s+/u', ' ', str_replace(['’', '‘', '`'], "'", Str::lower($stderr)));
 
         foreach (self::ERROR_REASONS as $fragment => $reason) {
             if (str_contains($haystack, $fragment)) {

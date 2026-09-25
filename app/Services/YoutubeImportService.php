@@ -104,6 +104,32 @@ class YoutubeImportService
     }
 
     /**
+     * Delete failed imports (and their thumbnails) last touched before $cutoff.
+     * Each row is locked and re-checked, so one retried meanwhile is kept.
+     */
+    public function expireFailed(\DateTimeInterface $cutoff): int
+    {
+        $expired = 0;
+
+        MediaImport::query()
+            ->where('status', MediaImport::STATUS_FAILED)
+            ->where('updated_at', '<', $cutoff)
+            ->pluck('id')
+            ->each(function (int $id) use ($cutoff, &$expired) {
+                DB::transaction(function () use ($id, $cutoff, &$expired) {
+                    $locked = MediaImport::query()->whereKey($id)->lockForUpdate()->first();
+
+                    if ($locked?->status === MediaImport::STATUS_FAILED && $locked->updated_at < $cutoff) {
+                        $this->purge($locked);
+                        $expired++;
+                    }
+                });
+            });
+
+        return $expired;
+    }
+
+    /**
      * Disabled users can't import: drop whatever they still have waiting.
      */
     public function cancelQueued(User $user): void

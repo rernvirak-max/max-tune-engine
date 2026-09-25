@@ -4,16 +4,17 @@ namespace App\Console\Commands;
 
 use App\Models\MediaImport;
 use App\Services\YoutubeImportProcessor;
+use App\Services\YoutubeImportService;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\File;
 
 #[Signature('imports:sweep')]
-#[Description('Fail YouTube imports stuck past the job timeout or never picked up, and delete orphaned scratch files')]
+#[Description('Fail YouTube imports stuck past the job timeout or never picked up, expire old failed imports, and delete orphaned scratch files')]
 class SweepStuckImports extends Command
 {
-    public function handle(YoutubeImportProcessor $processor): int
+    public function handle(YoutubeImportProcessor $processor, YoutubeImportService $imports): int
     {
         $cutoff = now()->subSeconds(
             (int) config('max-tune.youtube.job_timeout_seconds') + (int) config('max-tune.youtube.stuck_grace_seconds'),
@@ -43,9 +44,12 @@ class SweepStuckImports extends Command
             [MediaImport::STATUS_QUEUED],
         ));
 
+        // Failed rows keep their thumbnail while the user can still see/retry them; not forever.
+        $expiredFailed = $imports->expireFailed(now()->subDays((int) config('max-tune.youtube.failed_retention_days')));
+
         $orphanDirs = $this->deleteOrphanWorkDirs();
 
-        $this->info("Interrupted {$stuck->count()} stuck and {$expired->count()} expired queued import(s); removed {$orphanDirs} orphaned scratch dir(s).");
+        $this->info("Interrupted {$stuck->count()} stuck and {$expired->count()} expired queued import(s); deleted {$expiredFailed} old failed import(s); removed {$orphanDirs} orphaned scratch dir(s).");
 
         return self::SUCCESS;
     }

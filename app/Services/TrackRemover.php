@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\MediaImport;
 use App\Models\Track;
 
 class TrackRemover
@@ -21,6 +22,14 @@ class TrackRemover
         $this->media->delete($track->storage_path);
         $this->media->delete($track->cover_path);
         $track->delete();
+
+        // Tracks are soft-deleted, so the FK's nullOnDelete never fires. Unlink the
+        // import that made this track; its thumbnail was the cover deleted above,
+        // so the admin list shows the placeholder instead of a broken image.
+        MediaImport::query()->where('track_id', $track->id)->update([
+            'track_id' => null,
+            'thumbnail_path' => null,
+        ]);
 
         if ($owner && $size > 0) {
             $owner->storage_used_bytes = max(0, (int) $owner->storage_used_bytes - $size);

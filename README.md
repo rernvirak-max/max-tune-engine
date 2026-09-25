@@ -54,8 +54,8 @@ Three services from this repo, same env and the same persistent volume at `/app/
 |---------|---------|
 | web | `php artisan serve --host=0.0.0.0 --port=8000 --no-reload` |
 | worker (exactly 1 replica, no domain) | `php artisan queue:work database-imports --queue=imports --timeout=660 --tries=1 --sleep=3` |
-| scheduler | `php artisan schedule:work` (runs `imports:sweep` every 5 min) |
+| scheduler | `php artisan schedule:work` (runs `imports:sweep` every 5 min: fails stuck/lost imports, deletes failed imports after `YOUTUBE_FAILED_RETENTION_DAYS`, default 7) |
 
 The worker command must be used **exactly**: YouTube imports run on the dedicated `database-imports` queue connection, and Laravel applies the `retry_after` of the connection the worker pulls from. Only `database-imports` (`YOUTUBE_QUEUE_RETRY_AFTER`, default 900) outlives the job's 660s timeout. A worker on another connection could hand a long import out again and mark it interrupted. (The default `database` connection's `DB_QUEUE_RETRY_AFTER` defaults to 720 as a safety net, but don't rely on it.)
 
-Env: `QUEUE_CONNECTION=database`. yt-dlp, deno and ffmpeg are installed by `nixpacks.toml` (pinned, sha256-checked). To update yt-dlp, bump `YTDLP_VERSION` and `YTDLP_SHA256` together. After redeploying only the web app, run `php artisan queue:restart`.
+Env: `QUEUE_CONNECTION=database`. yt-dlp, deno and ffmpeg are installed by `nixpacks.toml` (pinned, sha256-checked). To update yt-dlp, bump `YTDLP_VERSION` and `YTDLP_SHA256` together; to update deno, bump `DENO_VERSION` and `DENO_SHA256` together (a mismatch fails the build). After redeploying only the web app, run `php artisan queue:restart`.
