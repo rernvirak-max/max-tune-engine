@@ -104,6 +104,8 @@ SH);
         $cookieFile = $argv[array_search('--cookies', $argv, true) + 1];
         $this->assertSame($this->workDir.'/cookies.txt', $cookieFile);
         $this->assertStringContainsString("SID\tsecret", (string) file_get_contents($cookieFile));
+        $this->assertSame(0600, fileperms($cookieFile) & 0777);
+        $this->assertSame(['argv.txt', 'cookies.txt', 'media.info.json'], array_map('basename', File::files($this->workDir)));
     }
 
     public function test_download_skipped_for_max_filesize_is_too_large(): void
@@ -118,9 +120,14 @@ SH);
         }
     }
 
-    public function test_slow_process_times_out(): void
+    public function test_slow_process_times_out_and_its_child_is_killed(): void
     {
-        $this->useStub('exec sleep 5');
+        // Like yt-dlp running ffmpeg: a child whose argv names a file in the scratch dir.
+        $this->useStub(<<<'SH'
+sh -c 'sleep 30; :' "$PWD/media.m4a" &
+echo $! > "$PWD/child.pid"
+wait
+SH);
 
         try {
             app(YtDlp::class)->fetchMetadata('https://www.youtube.com/watch?v=Ex4mpleVid0', $this->workDir, 1);
@@ -128,6 +135,9 @@ SH);
         } catch (MediaImportFailedException $e) {
             $this->assertSame(MediaImport::REASON_TIMEOUT, $e->reason);
         }
+
+        $childPid = (int) file_get_contents($this->workDir.'/child.pid');
+        $this->assertFalse($this->isAlive($childPid), 'The child process outlived the timed-out yt-dlp.');
     }
 
     public function test_version_is_reported_or_null_when_binary_is_missing(): void
@@ -137,6 +147,24 @@ SH);
 
         Config::set('max-tune.youtube.ytdlp_binary', $this->root.'/missing-yt-dlp');
         $this->assertNull(app(YtDlp::class)->version());
+    }
+
+    /**
+     * Running and not a zombie (an orphan may wait for its reaper briefly).
+     */
+    private function isAlive(int $pid): bool
+    {
+        for ($i = 0; $i < 20; $i++) {
+            $status = @file_get_contents("/proc/{$pid}/stat");
+
+            if ($status === false || preg_match('/\) [ZX] /', $status)) {
+                return false;
+            }
+
+            usleep(50_000);
+        }
+
+        return true;
     }
 
     private function useStub(string $body): void

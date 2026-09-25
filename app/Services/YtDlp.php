@@ -145,6 +145,8 @@ class YtDlp
         try {
             $process->run();
         } catch (ProcessTimedOutException $e) {
+            $this->killStragglers($workDir);
+
             throw new MediaImportFailedException(MediaImport::REASON_TIMEOUT, $e->getMessage());
         } catch (ProcessRuntimeException $e) {
             throw new MediaImportFailedException(MediaImport::REASON_UNKNOWN, $e->getMessage());
@@ -179,6 +181,16 @@ class YtDlp
         }
 
         return $arguments;
+    }
+
+    /**
+     * Best effort after a timeout: Symfony kills yt-dlp itself, but its ffmpeg
+     * child would keep running. Only processes working on this import have
+     * its scratch dir in their argv.
+     */
+    private function killStragglers(string $workDir): void
+    {
+        (new Process(['pkill', '-KILL', '-f', preg_quote($workDir.DIRECTORY_SEPARATOR)]))->run();
     }
 
     private function binary(): string

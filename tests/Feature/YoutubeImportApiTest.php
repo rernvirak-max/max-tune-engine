@@ -68,6 +68,7 @@ class YoutubeImportApiTest extends TestCase
             'lookalike host' => ['https://youtube.com.evil.test/watch?v=Ex4mpleVid0'],
             'channel' => ['https://www.youtube.com/@someone'],
             'bad id' => ['https://www.youtube.com/watch?v=short'],
+            'ambiguous v=' => ['https://www.youtube.com/watch?v=Ex4mpleVid0&v=0therVide01'],
             'javascript scheme' => ['javascript:alert(1)//youtube.com/watch?v=Ex4mpleVid0'],
             'garbage' => ['not a url at all'],
         ];
