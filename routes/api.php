@@ -1,13 +1,16 @@
 <?php
 
+use App\Http\Controllers\Api\Admin\ImportAdminController;
 use App\Http\Controllers\Api\Admin\InviteController as AdminInviteController;
 use App\Http\Controllers\Api\Admin\TrackAdminController;
 use App\Http\Controllers\Api\Admin\UserAdminController;
+use App\Http\Controllers\Api\Admin\YoutubeAdminController;
 use App\Http\Controllers\Api\AppConfigController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CatalogController;
 use App\Http\Controllers\Api\LikeController;
 use App\Http\Controllers\Api\MeController;
+use App\Http\Controllers\Api\MediaImportController;
 use App\Http\Controllers\Api\PlaylistController;
 use App\Http\Controllers\Api\TrackController;
 use Illuminate\Support\Facades\Route;
@@ -46,6 +49,12 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
     Route::get('catalog/jamendo', [CatalogController::class, 'searchJamendo']);
     Route::post('catalog/jamendo/import', [CatalogController::class, 'importJamendo']);
 
+    Route::get('imports', [MediaImportController::class, 'index']);
+    Route::post('imports/youtube', [MediaImportController::class, 'storeYoutube']);
+    Route::get('imports/{mediaImport}', [MediaImportController::class, 'show']);
+    Route::post('imports/{mediaImport}/retry', [MediaImportController::class, 'retry']);
+    Route::delete('imports/{mediaImport}', [MediaImportController::class, 'destroy']);
+
     Route::middleware('admin')->prefix('admin')->group(function () {
         Route::get('invites', [AdminInviteController::class, 'index']);
         Route::post('invites', [AdminInviteController::class, 'store']);
@@ -58,6 +67,12 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
 
         Route::get('tracks', [TrackAdminController::class, 'index']);
         Route::delete('tracks/{track}', [TrackAdminController::class, 'destroy']);
+
+        Route::get('imports', [ImportAdminController::class, 'index']);
+        Route::delete('imports/{mediaImport}', [ImportAdminController::class, 'destroy']);
+
+        Route::get('youtube/status', [YoutubeAdminController::class, 'status']);
+        Route::put('youtube/cookies', [YoutubeAdminController::class, 'updateCookies']);
     });
 });
 
@@ -66,3 +81,5 @@ Route::get('tracks/{track}/cover', [TrackController::class, 'cover'])
     ->name('api.tracks.cover');
 Route::get('tracks/{track}/stream', [TrackController::class, 'stream'])
     ->name('api.tracks.stream');
+Route::get('imports/{mediaImport}/thumbnail', [MediaImportController::class, 'thumbnail'])
+    ->name('api.imports.thumbnail');
