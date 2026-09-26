@@ -40,8 +40,24 @@ return [
             'connection' => env('DB_QUEUE_CONNECTION'),
             'table' => env('DB_QUEUE_TABLE', 'jobs'),
             'queue' => env('DB_QUEUE', 'default'),
-            'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 90),
+            // Above the YouTube import job's timeout (660s) so a worker started
+            // on this connection by mistake still can't re-deliver a running import.
+            'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 720),
             'after_commit' => false,
+        ],
+
+        // YouTube imports (config/max-tune.php "youtube"): retry_after must stay
+        // above the job's $timeout (job_timeout_seconds + worker margin) or a
+        // long import is handed to the worker twice. Laravel uses the retry_after
+        // of the connection the worker pulls from, so the worker must run:
+        //   php artisan queue:work database-imports --queue=imports --timeout=660 --tries=1 --sleep=3
+        'database-imports' => [
+            'driver' => 'database',
+            'connection' => env('DB_QUEUE_CONNECTION'),
+            'table' => env('DB_QUEUE_TABLE', 'jobs'),
+            'queue' => env('YOUTUBE_IMPORT_QUEUE', 'imports'),
+            'retry_after' => (int) env('YOUTUBE_QUEUE_RETRY_AFTER', 15 * 60),
+            'after_commit' => true,
         ],
 
         'beanstalkd' => [

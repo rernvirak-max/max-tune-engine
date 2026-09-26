@@ -10,6 +10,8 @@ use Illuminate\Support\Facades\URL;
 /** @mixin Track */
 class TrackResource extends JsonResource
 {
+    private const SIGNED_URL_TTL_HOURS = 6;
+
     /**
      * @return array<string, mixed>
      */
@@ -46,12 +48,7 @@ class TrackResource extends JsonResource
             return null;
         }
 
-        return self::absoluteMediaUrl(URL::temporarySignedRoute(
-            'api.tracks.cover',
-            now()->addHours(6),
-            ['track' => $this->id],
-            absolute: false,
-        ));
+        return self::signedMediaUrl('api.tracks.cover', ['track' => $this->id]);
     }
 
     private function streamUrl(): ?string
@@ -64,10 +61,20 @@ class TrackResource extends JsonResource
             return null;
         }
 
+        return self::signedMediaUrl('api.tracks.stream', ['track' => $this->id]);
+    }
+
+    /**
+     * Temporary signed media URL (cover, stream, import thumbnail) for <img>/<audio>.
+     *
+     * @param  array<string, mixed>  $parameters
+     */
+    public static function signedMediaUrl(string $routeName, array $parameters): string
+    {
         return self::absoluteMediaUrl(URL::temporarySignedRoute(
-            'api.tracks.stream',
-            now()->addHours(6),
-            ['track' => $this->id],
+            $routeName,
+            now()->addHours(self::SIGNED_URL_TTL_HOURS),
+            $parameters,
             absolute: false,
         ));
     }

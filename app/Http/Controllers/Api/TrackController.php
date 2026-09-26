@@ -8,6 +8,7 @@ use App\Http\Resources\TrackResource;
 use App\Models\Track;
 use App\Services\AudioStreamer;
 use App\Services\MediaStorage;
+use App\Services\TrackRemover;
 use App\Services\TrackUploadService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -75,27 +76,18 @@ class TrackController extends Controller
         return new TrackResource($track);
     }
 
-    public function destroy(Request $request, Track $track, MediaStorage $media): JsonResponse
+    public function destroy(Request $request, Track $track, TrackRemover $remover): JsonResponse
     {
         $this->authorizeOwner($request, $track);
 
-        $size = (int) $track->size;
-        $media->delete($track->storage_path);
-        $media->delete($track->cover_path);
-        $track->delete();
-
-        if ($size > 0) {
-            $user = $request->user();
-            $user->storage_used_bytes = max(0, (int) $user->storage_used_bytes - $size);
-            $user->save();
-        }
+        $remover->remove($track);
 
         return response()->json(['message' => 'Track deleted']);
     }
 
     public function cover(Request $request, Track $track, MediaStorage $media): StreamedResponse|Response
     {
-        $this->authorizeStreamAccess($request, $track);
+        $this->authorizeSignedOrOwner($request, $track->user_id);
 
         if (! $track->cover_path || ! $media->exists($track->cover_path)) {
             abort(404);
@@ -106,7 +98,7 @@ class TrackController extends Controller
 
     public function stream(Request $request, Track $track, AudioStreamer $streamer): BinaryFileResponse|StreamedResponse
     {
-        $this->authorizeStreamAccess($request, $track);
+        $this->authorizeSignedOrOwner($request, $track->user_id);
 
         return $streamer->stream($track, $request);
     }
@@ -116,18 +108,5 @@ class TrackController extends Controller
         if ($request->user()->id !== $track->user_id) {
             abort(403, 'You do not own this track.');
         }
-    }
-
-    private function authorizeStreamAccess(Request $request, Track $track): void
-    {
-        if ($request->hasValidSignature(absolute: false)) {
-            return;
-        }
-
-        if ($request->user()?->id === $track->user_id) {
-            return;
-        }
-
-        abort(403);
     }
 }

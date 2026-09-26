@@ -3,6 +3,31 @@
 # Nix's PHP ships without a php.ini, so PHP's built-in defaults apply
 # (2M upload_max_filesize / 8M post_max_size). Point PHP at the repo's
 # php.ini; `php artisan serve` and its `php -S` child both read PHPRC.
+#
+# Add from YouTube link: the queue worker needs yt-dlp, ffmpeg (m4a remux +
+# jpg thumbnails) and deno (yt-dlp's JS runtime for YouTube challenges).
+# yt-dlp and deno are pinned official release binaries, each checked against
+# its published SHA-256 (yt-dlp: SHA2-256SUMS, deno: the .sha256sum asset).
+# deno comes from its release because Nixpacks' pinned nixpkgs only has
+# deno 2.1.4 and yt-dlp needs >= 2.3.0. To update, bump the version and its
+# sha256 together and redeploy (e.g. when YouTube breaks yt-dlp).
 
 [variables]
 PHPRC = '/app/php.ini'
+YTDLP_VERSION = '2026.08.19'
+YTDLP_SHA256 = '58162f9bfdc27458ea47bfcb311cf47028f17d8154a8bf7d689861d46399230a'
+YTDLP_BINARY = '/app/bin/yt-dlp'
+DENO_VERSION = '2.9.7'
+DENO_SHA256 = 'c6527f24f4b16031d3ae4fa9f658d5f11534c8d84ce7dc8502420280919c3490'
+YTDLP_JS_RUNTIMES = 'deno:/app/bin/deno'
+
+[phases.setup]
+nixPkgs = ['...', 'ffmpeg', 'unzip']
+
+[phases.install]
+cmds = [
+    '...',
+    'mkdir -p /app/bin',
+    'curl -fsSL -o /app/bin/yt-dlp "https://github.com/yt-dlp/yt-dlp/releases/download/${YTDLP_VERSION}/yt-dlp_linux" && echo "${YTDLP_SHA256}  /app/bin/yt-dlp" | sha256sum -c - && chmod +x /app/bin/yt-dlp && /app/bin/yt-dlp --version',
+    'curl -fsSL -o /tmp/deno.zip "https://github.com/denoland/deno/releases/download/v${DENO_VERSION}/deno-x86_64-unknown-linux-gnu.zip" && echo "${DENO_SHA256}  /tmp/deno.zip" | sha256sum -c - && unzip -o /tmp/deno.zip -d /app/bin && rm /tmp/deno.zip && chmod +x /app/bin/deno && /app/bin/deno --version',
+]

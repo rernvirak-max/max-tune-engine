@@ -28,6 +28,30 @@ class MediaStorage
     public function storeTrackAudio(int $userId, UploadedFile $file): string
     {
         $ext = strtolower($file->getClientOriginalExtension() ?: 'bin');
+
+        return $this->putTrackAudio($userId, $file, $ext);
+    }
+
+    /**
+     * Store a local audio file (e.g. a finished YouTube import) the same way.
+     */
+    public function storeTrackAudioFile(int $userId, string $localPath): string
+    {
+        $ext = strtolower(pathinfo($localPath, PATHINFO_EXTENSION) ?: 'bin');
+
+        return $this->putTrackAudio($userId, $localPath, $ext);
+    }
+
+    public function storeCover(int $userId, string $binary, string $extension = 'jpg'): string
+    {
+        $path = sprintf('user/%d/covers/%s.%s', $userId, (string) Str::uuid(), $extension);
+        $this->disk()->put($path, $binary);
+
+        return $path;
+    }
+
+    private function putTrackAudio(int $userId, UploadedFile|string $file, string $ext): string
+    {
         $path = sprintf('user/%d/tracks/%s.%s', $userId, (string) Str::uuid(), $ext);
 
         $this->disk()->putFileAs(
@@ -35,14 +59,6 @@ class MediaStorage
             $file,
             basename($path)
         );
-
-        return $path;
-    }
-
-    public function storeCover(int $userId, string $binary, string $extension = 'jpg'): string
-    {
-        $path = sprintf('user/%d/covers/%s.%s', $userId, (string) Str::uuid(), $extension);
-        $this->disk()->put($path, $binary);
 
         return $path;
     }

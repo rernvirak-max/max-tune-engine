@@ -49,4 +49,49 @@ return [
         'client_id' => env('JAMENDO_CLIENT_ID'),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Add from YouTube link
+    |--------------------------------------------------------------------------
+    |
+    | Imports run on the "imports" queue via yt-dlp (+ ffmpeg for the m4a
+    | remux and jpg thumbnail). Per-file size reuses max_upload_kb and the
+    | storage quota above.
+    |
+    */
+
+    'youtube' => [
+        'ytdlp_binary' => env('YTDLP_BINARY', 'yt-dlp'),
+        /** Directory or binary passed to yt-dlp --ffmpeg-location; empty = ffmpeg on PATH */
+        'ffmpeg_binary' => env('FFMPEG_BINARY'),
+        /** Optional yt-dlp --js-runtimes value (e.g. "node"); empty = yt-dlp default (deno) */
+        'js_runtimes' => env('YTDLP_JS_RUNTIMES'),
+        /** Dedicated connection in config/queue.php (its retry_after outlives the job timeout) */
+        'queue_connection' => env('YOUTUBE_IMPORT_QUEUE_CONNECTION', 'database-imports'),
+        'queue' => env('YOUTUBE_IMPORT_QUEUE', 'imports'),
+        'max_duration_seconds' => (int) env('YOUTUBE_MAX_DURATION_SECONDS', 15 * 60),
+        /** Whole job budget (metadata + download) */
+        'job_timeout_seconds' => (int) env('YOUTUBE_JOB_TIMEOUT_SECONDS', 10 * 60),
+        /** Added to the job budget for the job's worker $timeout (cleanup + failure handling) */
+        'worker_timeout_margin_seconds' => 60,
+        'version_timeout_seconds' => 10,
+        /** Extra time after the job timeout before the sweep marks an import interrupted */
+        'stuck_grace_seconds' => (int) env('YOUTUBE_STUCK_GRACE_SECONDS', 5 * 60),
+        /** Queued this long without a worker picking it up (lost job): the sweep fails it so it frees a slot */
+        'queued_expiry_seconds' => (int) env('YOUTUBE_QUEUED_EXPIRY_SECONDS', 30 * 60),
+        /** Failed imports (and their thumbnails) are deleted by the sweep this many days after failing */
+        'failed_retention_days' => (int) env('YOUTUBE_FAILED_RETENTION_DAYS', 7),
+        'rate_limit' => (int) env('YOUTUBE_IMPORT_RATE_LIMIT', 10),
+        'rate_decay_seconds' => (int) env('YOUTUBE_IMPORT_RATE_DECAY_SECONDS', 3600),
+        'max_active_per_user' => (int) env('YOUTUBE_MAX_ACTIVE_IMPORTS', 2),
+        /** Backoff before each automatic retry when YouTube blocks the server */
+        'blocked_retry_delays_seconds' => [60, 5 * 60],
+        'list_limit' => 100,
+        /** Encrypted Netscape cookies.txt on the private "local" disk (never served) */
+        'cookies_path' => 'youtube/cookies.txt.enc',
+        'cookies_max_kb' => 1024,
+        /** Scratch space for in-flight downloads; wiped per import and by the sweep */
+        'work_dir' => storage_path('app/tmp/imports'),
+    ],
+
 ];
