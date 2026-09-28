@@ -48,6 +48,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
 
     Route::get('catalog/jamendo', [CatalogController::class, 'searchJamendo']);
     Route::post('catalog/jamendo/import', [CatalogController::class, 'importJamendo']);
+    Route::get('catalog/youtube', [CatalogController::class, 'searchYoutube']);
 
     Route::get('imports', [MediaImportController::class, 'index']);
     Route::post('imports/youtube', [MediaImportController::class, 'storeYoutube']);

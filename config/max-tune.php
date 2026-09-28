@@ -61,6 +61,8 @@ return [
     */
 
     'youtube' => [
+        /** Google Cloud API key for Data API v3 catalog search (not used by yt-dlp) */
+        'data_api_key' => env('YOUTUBE_DATA_API_KEY'),
         'ytdlp_binary' => env('YTDLP_BINARY', 'yt-dlp'),
         /** Directory or binary passed to yt-dlp --ffmpeg-location; empty = ffmpeg on PATH */
         'ffmpeg_binary' => env('FFMPEG_BINARY'),

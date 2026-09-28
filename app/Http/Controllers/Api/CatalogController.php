@@ -5,8 +5,10 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\ImportJamendoTrackRequest;
 use App\Http\Resources\TrackResource;
+use App\Models\MediaImport;
 use App\Services\JamendoClient;
 use App\Services\JamendoImportService;
+use App\Services\YoutubeDataClient;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use RuntimeException;
@@ -39,6 +41,46 @@ class CatalogController extends Controller
 
         $data = array_map(function (array $row) use ($importedIds) {
             $row['imported'] = in_array($row['external_id'], $importedIds, true);
+
+            return $row;
+        }, $results);
+
+        return response()->json(['data' => $data]);
+    }
+
+    public function searchYoutube(Request $request, YoutubeDataClient $youtube): JsonResponse
+    {
+        $validated = $request->validate([
+            'q' => ['required', 'string', 'min:1', 'max:120'],
+            'limit' => ['sometimes', 'integer', 'min:1', 'max:50'],
+        ]);
+
+        try {
+            $results = $youtube->searchVideos(
+                $validated['q'],
+                (int) ($validated['limit'] ?? 20),
+            );
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 502);
+        }
+
+        $ids = array_column($results, 'external_id');
+
+        $importedIds = $request->user()->tracks()
+            ->where('source', MediaImport::TRACK_SOURCE)
+            ->whereIn('source_id', $ids)
+            ->pluck('source_id')
+            ->all();
+
+        $importingIds = $request->user()->mediaImports()
+            ->whereIn('status', MediaImport::ACTIVE_STATUSES)
+            ->whereIn('video_id', $ids)
+            ->pluck('video_id')
+            ->all();
+
+        $data = array_map(function (array $row) use ($importedIds, $importingIds) {
+            $row['imported'] = in_array($row['external_id'], $importedIds, true);
+            $row['importing'] = in_array($row['external_id'], $importingIds, true);
 
             return $row;
         }, $results);
