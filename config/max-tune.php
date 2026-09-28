@@ -49,4 +49,9 @@ return [
         'client_id' => env('JAMENDO_CLIENT_ID'),
     ],
 
+    'youtube' => [
+        'binary' => env('YTDLP_BINARY', 'yt-dlp'),
+        'download_timeout' => (int) env('YOUTUBE_DOWNLOAD_TIMEOUT', 600),
+    ],
+
 ];

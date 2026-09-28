@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\LikeController;
 use App\Http\Controllers\Api\MeController;
 use App\Http\Controllers\Api\PlaylistController;
 use App\Http\Controllers\Api\TrackController;
+use App\Http\Controllers\Api\YoutubeImportController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('app', [AppConfigController::class, 'show']);
@@ -45,6 +46,10 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
 
     Route::get('catalog/jamendo', [CatalogController::class, 'searchJamendo']);
     Route::post('catalog/jamendo/import', [CatalogController::class, 'importJamendo']);
+
+    Route::get('imports/youtube', [YoutubeImportController::class, 'index']);
+    Route::post('imports/youtube', [YoutubeImportController::class, 'store']);
+    Route::delete('imports/youtube/{youtubeImport}', [YoutubeImportController::class, 'destroy']);
 
     Route::middleware('admin')->prefix('admin')->group(function () {
         Route::get('invites', [AdminInviteController::class, 'index']);
