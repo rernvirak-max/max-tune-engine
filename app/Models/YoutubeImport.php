@@ -15,7 +15,7 @@ class YoutubeImport extends Model
 
     public const STATUS_PROCESSING = 'processing';
 
-    public const STATUS_DONE = 'done';
+    public const STATUS_DONE = 'ready';
 
     public const STATUS_FAILED = 'failed';
 

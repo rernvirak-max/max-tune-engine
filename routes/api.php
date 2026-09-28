@@ -47,9 +47,10 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
     Route::get('catalog/jamendo', [CatalogController::class, 'searchJamendo']);
     Route::post('catalog/jamendo/import', [CatalogController::class, 'importJamendo']);
 
-    Route::get('imports/youtube', [YoutubeImportController::class, 'index']);
+    Route::get('imports', [YoutubeImportController::class, 'index']);
     Route::post('imports/youtube', [YoutubeImportController::class, 'store']);
-    Route::delete('imports/youtube/{youtubeImport}', [YoutubeImportController::class, 'destroy']);
+    Route::post('imports/{import}/retry', [YoutubeImportController::class, 'retry']);
+    Route::delete('imports/{import}', [YoutubeImportController::class, 'destroy']);
 
     Route::middleware('admin')->prefix('admin')->group(function () {
         Route::get('invites', [AdminInviteController::class, 'index']);

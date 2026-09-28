@@ -6,6 +6,7 @@ use App\Jobs\ProcessYoutubeImportJob;
 use App\Models\User;
 use App\Models\YoutubeImport;
 use App\Services\AudioMetadataExtractor;
+use App\Services\TrackUploadService;
 use App\Services\YoutubeDownloadService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
@@ -79,7 +80,7 @@ class YoutubeImportApiTest extends TestCase
 
         Sanctum::actingAs($user);
 
-        $this->getJson('/api/imports/youtube')
+        $this->getJson('/api/imports?status=all')
             ->assertOk()
             ->assertJsonCount(1, 'data')
             ->assertJsonPath('data.0.video_id', 'aaaaaaaaaaa');
@@ -98,7 +99,7 @@ class YoutubeImportApiTest extends TestCase
 
         Sanctum::actingAs($user);
 
-        $this->deleteJson('/api/imports/youtube/'.$import->id)
+        $this->deleteJson('/api/imports/'.$import->id)
             ->assertOk();
 
         $this->assertSame(YoutubeImport::STATUS_CANCELLED, $import->fresh()->status);
@@ -151,7 +152,7 @@ class YoutubeImportApiTest extends TestCase
 
         (new ProcessYoutubeImportJob($import->id))->handle(
             app(YoutubeDownloadService::class),
-            app(\App\Services\TrackUploadService::class),
+            app(TrackUploadService::class),
         );
 
         $import->refresh();
