@@ -3,10 +3,12 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\StoreAdminUserRequest;
 use App\Models\User;
 use App\Services\YoutubeImportService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 
 class UserAdminController extends Controller
 {
@@ -18,6 +20,43 @@ class UserAdminController extends Controller
             ->map(fn (User $user) => $this->payload($user));
 
         return response()->json(['data' => $users]);
+    }
+
+    /**
+     * Admin creates a regular user directly (any APP_MODE). When no password
+     * is supplied a strong temporary one is generated and returned once in
+     * `temporary_password`; only its hash is stored and it is never logged.
+     */
+    public function store(StoreAdminUserRequest $request): JsonResponse
+    {
+        $data = $request->validated();
+
+        $temporaryPassword = null;
+        $password = $data['password'] ?? null;
+
+        if ($password === null || $password === '') {
+            $temporaryPassword = Str::password(16, letters: true, numbers: true, symbols: false);
+            $password = $temporaryPassword;
+        }
+
+        $user = User::query()->create([
+            'name' => $data['name'],
+            'email' => $data['email'],
+            'password' => $password,
+            'role' => 'user',
+            'status' => 'active',
+            'storage_used_bytes' => 0,
+            'storage_quota_bytes' => $data['quota_bytes'] ?? null,
+        ]);
+
+        $body = ['data' => $this->payload($user->fresh())];
+
+        if ($temporaryPassword !== null) {
+            $body['temporary_password'] = $temporaryPassword;
+        }
+
+        return response()->json($body, 201)
+            ->header('Cache-Control', 'no-store, private');
     }
 
     public function disable(Request $request, User $user, YoutubeImportService $imports): JsonResponse
