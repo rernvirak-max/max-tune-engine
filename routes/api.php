@@ -62,6 +62,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::post('invites/{invite}/revoke', [AdminInviteController::class, 'revoke']);
 
         Route::get('users', [UserAdminController::class, 'index']);
+        Route::post('users', [UserAdminController::class, 'store']);
         Route::post('users/{user}/disable', [UserAdminController::class, 'disable']);
         Route::post('users/{user}/enable', [UserAdminController::class, 'enable']);
         Route::patch('users/{user}/quota', [UserAdminController::class, 'updateQuota']);
